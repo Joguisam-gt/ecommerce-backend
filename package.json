@@ -1,0 +1,27 @@
+{
+  "name": "ecommerce-backend",
+  "version": "0.1.0",
+  "description": "Backend de e-commerce: Fase 1 - arquitectura base, base de datos, autenticacion RBAC y gestion de usuarios.",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "db:init": "node --env-file-if-exists=.env scripts/init-db.js",
+    "db:seed-superuser": "node --env-file-if-exists=.env scripts/seed-superuser.js",
+    "test": "node --test --test-reporter=spec \"tests/**/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"tests/**/*.test.js\""
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.9.0"
+  }
+}
