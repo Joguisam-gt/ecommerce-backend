@@ -14,7 +14,8 @@
     "db:init": "node --env-file-if-exists=.env scripts/init-db.js",
     "db:seed-superuser": "node --env-file-if-exists=.env scripts/seed-superuser.js",
     "test": "node --test --test-reporter=spec \"tests/**/*.test.js\"",
-    "test:coverage": "node --test --experimental-test-coverage \"tests/**/*.test.js\""
+    "test:coverage": "node --test --experimental-test-coverage \"tests/**/*.test.js\"",
+    "db:seed-catalog": "node --env-file-if-exists=.env scripts/seed-catalog.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
