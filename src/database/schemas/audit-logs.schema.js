@@ -8,6 +8,17 @@
  * Fase 3: las mutaciones del panel de administracion registran ademas el
  * contrato de cambio completo: role, targetCollection, targetId,
  * previousState, newState y timestamp (ver AuditService.recordChange).
+ *
+ * Fase 4 (extension retrocompatible, todos los campos nuevos son opcionales):
+ * - snapshot: copia redactada del documento purgado (accion record.purged).
+ * - AuditService escribe siempre timestamp (= createdAt) y targetCollection.
+ * - ix_audit_collection_timestamp y ix_audit_timestamp sirven la consulta del
+ *   superusuario (filtro por coleccion y/o rango de fechas, orden timestamp desc).
+ *   El nombre ix_audit_target_timestamp ya lo usa el indice de la Fase 3
+ *   (targetCollection + targetId + timestamp), por eso el nuevo lleva otro nombre.
+ * - backfill: tras el collMod, las entradas antiguas sin timestamp reciben el
+ *   valor de su createdAt (campo derivado e identico), para que el filtro y el
+ *   orden por timestamp las incluyan. Es idempotente y no altera otros campos.
  */
 import { COLLECTIONS } from '../collections.js';
 import * as t from './schema-types.js';
@@ -40,6 +51,7 @@ export const auditLogsCollection = Object.freeze({
         previousState: { bsonType: ['object', 'null'] },
         newState: { bsonType: ['object', 'null'] },
         timestamp: t.nullableDate,
+        snapshot: { bsonType: ['object', 'null'] },
       },
     },
   },
@@ -53,5 +65,17 @@ export const auditLogsCollection = Object.freeze({
       name: 'ix_audit_target_timestamp',
       partialFilterExpression: { targetCollection: { $type: 'string' } },
     },
+    { key: { targetCollection: 1, timestamp: -1 }, name: 'ix_audit_collection_timestamp' },
+    { key: { timestamp: -1 }, name: 'ix_audit_timestamp' },
   ],
+  /**
+   * Relleno idempotente posterior al collMod (ver setup.js): copia createdAt en
+   * timestamp cuando falta o es null. Se ejecuta despues de actualizar el
+   * validador para que un esquema anterior sin "timestamp" no lo rechace.
+   * @param {import('mongodb').Db} db
+   */
+  backfill: (db) =>
+    db
+      .collection(COLLECTIONS.AUDIT_LOGS)
+      .updateMany({ timestamp: null, createdAt: { $type: 'date' } }, [{ $set: { timestamp: '$createdAt' } }]),
 });

@@ -39,7 +39,7 @@ function jsonSchemaOf(validator) {
 }
 
 /** Colecciones que solo se consultan por _id y no declaran indices propios. */
-const ID_ONLY_COLLECTIONS = Object.freeze([COLLECTIONS.COUNTERS]);
+const ID_ONLY_COLLECTIONS = Object.freeze([COLLECTIONS.COUNTERS, COLLECTIONS.SYSTEM_SETTINGS]);
 
 describe('Definiciones de colecciones', () => {
   it('cubre todas las colecciones declaradas', () => {
@@ -53,7 +53,7 @@ describe('Definiciones de colecciones', () => {
       assert.equal(schema.bsonType, 'object', definition.name);
       assert.equal(schema.additionalProperties, false, definition.name);
       assert.ok(schema.required.length > 0, definition.name);
-      // counters solo usa el indice _id; el resto debe declarar indices propios.
+      // counters y system_settings (Fase 4) solo usan el indice _id; el resto debe declarar indices propios.
       if (!ID_ONLY_COLLECTIONS.includes(definition.name)) assert.ok(definition.indexes.length > 0, definition.name);
       for (const index of definition.indexes) assert.ok(index.name, `${definition.name}: indice sin nombre`);
     }

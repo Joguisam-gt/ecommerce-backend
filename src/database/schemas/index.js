@@ -16,6 +16,7 @@ import { cartsCollection } from './carts.schema.js';
 import { countersCollection } from './counters.schema.js';
 import { purchasesCollection } from './purchases.schema.js';
 import { inventoryLossesCollection } from './inventory-losses.schema.js';
+import { systemSettingsCollection } from './system-settings.schema.js';
 
 export const COLLECTION_DEFINITIONS = Object.freeze([
   usersCollection,
@@ -29,4 +30,5 @@ export const COLLECTION_DEFINITIONS = Object.freeze([
   countersCollection,
   purchasesCollection,
   inventoryLossesCollection,
+  systemSettingsCollection,
 ]);

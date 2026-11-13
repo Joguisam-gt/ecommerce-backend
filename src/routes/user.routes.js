@@ -16,6 +16,10 @@
  * | PATCH  | /:id/role         | admins:manage     | si        | no    | no   |
  * | DELETE | /:id              | users:delete      | si        | no    | no   |
  * (1) solo sobre cuentas con rol user (ver user-access.policy.js).
+ * PATCH /:id/role y /:id/status se ejecutan en la transaccion de StaffService
+ * (regla anti-bloqueo del ultimo superusuario). DELETE /:id delega en
+ * PurgeService: 400 NOT_SOFT_DELETED si la cuenta sigue activa y 409
+ * FISCAL_INTEGRITY_LOCK si tiene pedidos o facturas.
  */
 import { Router } from 'express';
 import { PERMISSIONS as P } from '../constants/permissions.js';

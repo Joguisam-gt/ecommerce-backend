@@ -5,29 +5,52 @@
  */
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { ObjectId } from 'mongodb';
 import { createApp } from '../../src/app.js';
 import { buildContainer } from '../../src/container.js';
 import { ROLES } from '../../src/constants/roles.js';
 import { silentLogger } from '../../src/utils/logger.js';
 import { TEST_PASSWORD, makeUser, testConfig } from '../helpers/fixtures.js';
+import { InMemorySequenceRepository } from '../helpers/checkout-fakes.js';
 import { InMemoryAuditLogRepository, InMemoryUserRepository } from '../helpers/in-memory-repositories.js';
+import {
+  FakeTransactionRunner,
+  InMemoryFiscalReferenceRepository,
+  InMemoryPurgeDatabase,
+  InMemoryPurgeRepository,
+} from '../helpers/superuser-fakes.js';
 
 describe('API /api/v1 (auth + RBAC)', () => {
   const superuser = makeUser({ role: ROLES.SUPERUSER, email: 'root@example.com' });
   const admin = makeUser({ role: ROLES.ADMIN, email: 'admin@example.com' });
   const customer = makeUser({ role: ROLES.USER, email: 'cliente@example.com' });
 
+  // Datos de DELETE /users/:id (delegado en la purga de la Fase 4).
+  const activeTarget = makeUser({ role: ROLES.USER, email: 'activo@example.com' });
+  const invoicedTarget = makeUser({ role: ROLES.USER, isActive: false, email: 'facturado@example.com' });
+  const cleanTarget = makeUser({ role: ROLES.USER, isActive: false, email: 'limpio@example.com' });
+
   let server;
   let baseUrl;
+  let purgeDatabase;
 
   before(async () => {
+    const userRepository = new InMemoryUserRepository([superuser, admin, customer]);
+    const sequenceRepository = new InMemorySequenceRepository();
+    purgeDatabase = new InMemoryPurgeDatabase()
+      .insert('users', activeTarget, invoicedTarget, cleanTarget)
+      .insert('invoices', { _id: new ObjectId(), userId: invoicedTarget._id, entityType: 'cliente', items: [] });
     const container = buildContainer({
       config: testConfig,
       logger: silentLogger,
       repositories: {
-        userRepository: new InMemoryUserRepository([superuser, admin, customer]),
+        userRepository,
         auditLogRepository: new InMemoryAuditLogRepository(),
+        sequenceRepository,
+        purgeRepository: new InMemoryPurgeRepository(purgeDatabase),
+        fiscalReferenceRepository: new InMemoryFiscalReferenceRepository(purgeDatabase),
       },
+      transactionRunner: new FakeTransactionRunner([userRepository, sequenceRepository, purgeDatabase]),
     });
     const app = createApp({ config: testConfig, container, logger: silentLogger });
     await new Promise((resolve) => {
@@ -149,7 +172,7 @@ describe('API /api/v1 (auth + RBAC)', () => {
       assert.ok(body.data.every((log) => log.action === 'auth.login'));
     });
 
-    it('superuser: crea un admin y luego lo elimina fisicamente', async () => {
+    it('superuser: crea un admin y no puede borrarlo fisicamente sin desactivarlo antes', async () => {
       const created = await call('/users', {
         method: 'POST',
         token: tokens.superuser,
@@ -158,8 +181,37 @@ describe('API /api/v1 (auth + RBAC)', () => {
       assert.equal(created.status, 201);
       assert.equal(created.body.data.role, 'admin');
 
-      const removed = await call(`/users/${created.body.data.id}`, { method: 'DELETE', token: tokens.superuser });
+      const deactivated = await call(`/users/${created.body.data.id}/status`, {
+        method: 'PATCH',
+        token: tokens.superuser,
+        body: { isActive: false },
+      });
+      assert.equal(deactivated.status, 200);
+      assert.equal(deactivated.body.data.isActive, false);
+    });
+
+    it('DELETE /users/:id de un usuario activo: 400 NOT_SOFT_DELETED', async () => {
+      const { status, body } = await call(`/users/${activeTarget._id}`, { method: 'DELETE', token: tokens.superuser });
+      assert.equal(status, 400);
+      assert.equal(body.error.code, 'NOT_SOFT_DELETED');
+      assert.ok(purgeDatabase.find('users', activeTarget._id));
+    });
+
+    it('DELETE /users/:id de un usuario con facturas: 409 FISCAL_INTEGRITY_LOCK', async () => {
+      const { status, body } = await call(`/users/${invoicedTarget._id}`, { method: 'DELETE', token: tokens.superuser });
+      assert.equal(status, 409);
+      assert.equal(body.error.code, 'FISCAL_INTEGRITY_LOCK');
+      assert.ok(purgeDatabase.find('users', invoicedTarget._id));
+    });
+
+    it('DELETE /users/:id de un usuario desactivado y sin referencias: 204', async () => {
+      const removed = await call(`/users/${cleanTarget._id}`, { method: 'DELETE', token: tokens.superuser });
       assert.equal(removed.status, 204);
+      assert.equal(purgeDatabase.find('users', cleanTarget._id), null);
+
+      const again = await call(`/users/${cleanTarget._id}`, { method: 'DELETE', token: tokens.superuser });
+      assert.equal(again.status, 404);
+      assert.equal(again.body.error.code, 'USER_NOT_FOUND');
     });
 
     it('valida el formato del identificador', async () => {
