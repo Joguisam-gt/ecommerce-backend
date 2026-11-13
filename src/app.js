@@ -28,7 +28,10 @@ function buildCorsOptions(allowedOrigins) {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    // Idempotency-Key: el checkout del POS la envia desde el navegador (sin ella el preflight falla).
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+    // Permite al frontend leer si un checkout fue un reintento idempotente.
+    exposedHeaders: ['Idempotent-Replayed'],
     maxAge: 600,
   };
 }

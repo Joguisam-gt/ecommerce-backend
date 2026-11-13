@@ -2,6 +2,14 @@
 
 API REST de un comercio electronico (catalogo, carrito, checkout tipo POS, facturacion, panel de administracion y modulo de superusuario) con autenticacion JWT, control de acceso por roles (RBAC) y MongoDB. Fue desarrollada como proyecto academico para ser consumida por la aplicacion web/movil del repositorio `ecommerce-frontend`.
 
+> **Repositorios del proyecto**
+>
+> | Parte | Repositorio | En local (Docker) |
+> |---|---|---|
+> | Backend (este) | [Joguisam-gt/ecommerce-backend](https://github.com/Joguisam-gt/ecommerce-backend) | API: <http://localhost:3000/api/v1> |
+> | Frontend | [Joguisam-gt/ecommerce-frontend](https://github.com/Joguisam-gt/ecommerce-frontend) | Tienda y panel: <http://localhost:8081> |
+> | Documentacion de la API | Swagger UI ([seccion](#documentacion-interactiva-swagger)) | <http://localhost:8082> |
+
 ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
 ![Node.js](https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white)
 ![Express](https://img.shields.io/badge/Express-000000?style=for-the-badge&logo=express&logoColor=white)
@@ -161,13 +169,14 @@ Comprobacion rapida: `GET http://localhost:3000/api/v1/health`.
 
 El repositorio incluye un `Dockerfile` (imagen `node:22-slim`, usuario `node`, `NODE_ENV=production`, puerto 3000 y `HEALTHCHECK` contra `/api/v1/health`) y un `.dockerignore` (excluye `node_modules`, `.env`, `.git`, `tests` y `coverage`). Solo copia `src/` y `scripts/` a la imagen.
 
-El archivo `docker-compose.yml` **no esta dentro de este repositorio**: vive en la carpeta padre que contiene los repositorios `ecommerce-backend` y `ecommerce-frontend`, y levanta tres servicios:
+El archivo `docker-compose.yml` **no esta dentro de este repositorio**: vive en la carpeta padre que contiene los repositorios `ecommerce-backend` y `ecommerce-frontend` (junto a un `.env` con `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `SUPERUSER_EMAIL` y `SUPERUSER_PASSWORD`), y levanta cuatro servicios:
 
 | Servicio | Imagen / origen | Puerto | Notas |
 |---|---|---|---|
 | `mongo` | `mongo:8.0` | `127.0.0.1:27017` | Replica set de un nodo `rs0` (necesario para transacciones), volumen `mongo-data`, healthcheck que ejecuta `rs.initiate` |
-| `backend` | `Dockerfile` de este repositorio | 3000 | `MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0`, `CORS_ORIGINS=http://localhost:8081` |
-| `frontend` | nginx con la app web exportada | 8081 | Repositorio `ecommerce-frontend` |
+| `backend` | `Dockerfile` de este repositorio | 3000 | `MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0`, `CORS_ORIGINS=http://localhost:8081,http://localhost:8082` |
+| `frontend` | nginx con la app web exportada | 8081 | Repositorio [`ecommerce-frontend`](https://github.com/Joguisam-gt/ecommerce-frontend) |
+| `docs` | `swaggerapi/swagger-ui:v5.17.14` | 8082 | Documentacion interactiva; lee `http://localhost:3000/api/v1/docs/openapi.json` |
 
 Desde la carpeta que contiene el `docker-compose.yml`:
 
@@ -178,6 +187,89 @@ docker compose exec backend node scripts/seed-catalog.js   # 8 productos y 3 cup
 ```
 
 Dentro del contenedor los scripts se invocan con `node` directamente (no hay archivo `.env` en la imagen; las variables las inyecta el compose).
+
+> **Importante:** con Docker la API usa el MongoDB del contenedor `mongo`, no el `MONGODB_URI` del `.env` de este repositorio. Si ejecutas `npm run db:*` en tu equipo, los datos van a la base del `.env` (por ejemplo Atlas), no a la de Docker. Para la base de Docker usa siempre `docker compose exec backend node scripts/<script>.js`.
+
+Una vez arriba:
+
+| Que | URL |
+|---|---|
+| Tienda y panel (frontend) | <http://localhost:8081> |
+| API | <http://localhost:3000/api/v1> (salud: `/health`) |
+| Swagger UI | <http://localhost:8082> |
+| Especificacion OpenAPI | <http://localhost:3000/api/v1/docs/openapi.json> |
+
+## 7. Iniciar sesion y hacer una compra
+
+### Cuentas de prueba
+
+| Rol | Como obtenerla |
+|---|---|
+| Superusuario | Correo y contrasena de `SUPERUSER_EMAIL` / `SUPERUSER_PASSWORD`. Con Docker son los del `.env` de la carpeta padre (consultalos con `docker compose exec backend printenv SUPERUSER_EMAIL SUPERUSER_PASSWORD`); sin Docker, los del `.env` de este repositorio. Se crea con `seed-superuser` (no hace nada si ya existe uno). |
+| Administrador | Lo crea el superusuario desde Gobernanza (frontend) o con `POST /superuser/staff`. |
+| Cliente | Registro publico: todo alta por `POST /auth/register` es rol `user`. El frontend no tiene pantalla de registro; usa el comando de abajo o Swagger. |
+
+Crear un cliente de prueba (la contrasena necesita 8 caracteres o mas, mayuscula, minuscula y numero):
+
+```bash
+curl -s -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"cliente.prueba@test.com","password":"Cliente1234","firstName":"Cliente","lastName":"Prueba"}'
+```
+
+### Desde el navegador (recomendado)
+
+1. Abre <http://localhost:8081> e inicia sesion con el cliente.
+2. **Ir a la tienda** -> elige un producto -> **Agregar al Carrito** -> **Ir al carrito**.
+3. **Proceder al pago**, elige el metodo y pulsa **Confirmar pedido**:
+   - *Contra entrega:* nombre, correo, telefono y direccion obligatorios. Pedido `confirmed`, factura `pending_payment`.
+   - *Tarjeta:* se tokeniza en el cliente (pasarela simulada; nunca viaja el numero ni el CVV). Pedido y factura `paid`.
+   - *Transferencia:* datos del comprobante. Pedido `pending_verification` hasta que un admin lo apruebe en **Resumen y conciliacion**.
+4. Cierra sesion, entra como superusuario o admin y abre **Panel Admin -> Resumen y conciliacion** (o **Reportes**): la venta aparece en ventas totales, pedidos, ticket promedio, unidades vendidas y desglose por metodo de pago.
+
+> Las metricas solo cuentan pedidos `confirmed`, `paid`, `processing`, `shipped` y `delivered`. Una transferencia no suma hasta aprobarla.
+
+### Desde la terminal (curl)
+
+```bash
+API=http://localhost:3000/api/v1
+
+# 1. Login (guarda las cookies de sesion)
+curl -s -c cookies.txt -X POST $API/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"cliente.prueba@test.com","password":"Cliente1234"}'
+
+# 2. Catalogo publico: copia el "id" de un producto
+curl -s "$API/store/products?limit=5"
+
+# 3. Carrito (opcional: cupon BIENVENIDA10)
+curl -s -b cookies.txt -X POST $API/cart/items -H "Content-Type: application/json" \
+  -d '{"productId":"<ID_DEL_PRODUCTO>","quantity":1}'
+curl -s -b cookies.txt -X POST $API/cart/coupon -H "Content-Type: application/json" -d '{"code":"BIENVENIDA10"}'
+
+# 4. Checkout con tarjeta tokenizada
+curl -s -b cookies.txt -X POST $API/pos/checkout \
+  -H "Content-Type: application/json" -H "Idempotency-Key: compra-0001" \
+  -d '{"paymentMethod":"card","nit":"CF",
+       "shippingAddress":{"line1":"5a avenida 10-20","city":"Guatemala","country":"GT"},
+       "payment":{"paymentToken":"tok_prueba12345","last4":"4242","cardHolderName":"Cliente Prueba","cardBrand":"Visa"}}'
+
+# 5. Facturas del cliente
+curl -s -b cookies.txt $API/invoices
+```
+
+En lugar de cookies puedes usar el `data.accessToken` del login como `Authorization: Bearer <token>` (caduca a los 15 minutos por defecto).
+
+### Solucion de problemas
+
+| Sintoma | Causa y solucion |
+|---|---|
+| En la web: "No hay conexion con el servidor" al confirmar el pedido | El preflight CORS rechazo una cabecera. `app.js` debe permitir `Idempotency-Key` en `allowedHeaders` y el origen debe estar en `CORS_ORIGINS`. Reconstruye el backend: `docker compose up -d --build backend`. |
+| `INVALID_CREDENTIALS` con el superusuario | La contrasena no es la de la base que usa la API (Docker vs `.env` local) o el superusuario aun no existe: ejecuta `seed-superuser` en el contenedor. |
+| `SHIPPING_ADDRESS_REQUIRED` | Hay productos sin retiro en tienda (`pickupAvailable: false`): envia `shippingAddress`. |
+| `INSUFFICIENT_STOCK` | No hay unidades suficientes (los audifonos del catalogo de ejemplo tienen 1). |
+| El checkout rechaza el metodo de pago | Cada producto acepta solo algunos metodos (`acceptedPaymentMethods`). |
+| `503 MAINTENANCE_MODE` | El superusuario activo el modo mantenimiento en la configuracion global. |
+| `CORS_REJECTED` | El origen del navegador no esta en `CORS_ORIGINS` (curl y Postman no envian `Origin`). |
 
 ---
 
@@ -203,6 +295,7 @@ ecommerce-backend/
 │   ├── config/                # env.js (configuracion validada e inmutable), database.js (Singleton MongoClient)
 │   ├── constants/             # roles, permissions (matriz RBAC), commerce, settings, superuser
 │   ├── database/              # collections.js, setup.js, transaction-runner.js, schemas/ ($jsonSchema e indices)
+│   ├── docs/                  # openapi.js: especificacion OpenAPI 3 (servida en /api/v1/docs/openapi.json)
 │   ├── routes/                # Definicion de endpoints y permiso requerido por ruta
 │   ├── middlewares/           # authenticate, authorize, require-superuser, validate, validate-checkout,
 │   │                          # sanitize-input, security-headers, pci-guard, maintenance-guard, error-handler
@@ -571,6 +664,20 @@ Documento unico `_id: "global_config"`.
 | `seq` | int | Valor secuencial. |
 
 ## Documentacion de la API
+
+### Documentacion interactiva (Swagger)
+
+La especificacion OpenAPI 3 vive en `src/docs/openapi.js` y la API la publica sin autenticacion en `GET /api/v1/docs/openapi.json`. Una prueba automatica comprueba que cada ruta registrada en Express este documentada, asi que la especificacion no puede quedarse atras del codigo.
+
+Con Docker, el servicio `docs` (Swagger UI) la muestra en **<http://localhost:8082>**. Para probar endpoints protegidos:
+
+1. Abre `Autenticacion -> POST /auth/login`, pulsa **Try it out** y envia el correo y la contrasena.
+2. Copia `data.accessToken` de la respuesta, pulsa **Authorize** (arriba a la derecha) y pegalo en `bearerAuth`.
+3. Usa **Try it out** en cualquier endpoint; la autorizacion se conserva al recargar la pagina.
+
+Las peticiones salen del navegador hacia `http://localhost:3000`, por eso `http://localhost:8082` esta en `CORS_ORIGINS`. Sin Docker puedes cargar la misma URL de la especificacion en cualquier Swagger UI o importarla en Postman.
+
+### Referencia
 
 Base: `/api/v1` (alias `/api`; la cookie de refresco solo viaja a `/api/v1/auth`). Las respuestas exitosas usan `{ "data": ... }` y las listas paginadas añaden `meta` (`total`, `page`, `limit`, `totalPages`; el catalogo tambien incluye `currency`). Los errores tienen formato uniforme:
 

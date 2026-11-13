@@ -229,6 +229,20 @@ describe('API /api/v1 (auth + RBAC)', () => {
     });
   });
 
+  it('el preflight CORS del checkout permite la cabecera Idempotency-Key', async () => {
+    const response = await fetch(`${baseUrl}/pos/checkout`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: testConfig.cors.origins[0],
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type,idempotency-key',
+      },
+    });
+    assert.equal(response.status, 204);
+    const allowed = (response.headers.get('access-control-allow-headers') ?? '').toLowerCase();
+    assert.ok(allowed.split(',').includes('idempotency-key'), `cabeceras permitidas: ${allowed}`);
+  });
+
   it('rutas inexistentes devuelven 404 JSON', async () => {
     const { status, body } = await call('/no-existe');
     assert.equal(status, 404);
