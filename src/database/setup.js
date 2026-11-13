@@ -4,6 +4,8 @@
  * Para cada definicion: crea la coleccion con su validador si no existe, o
  * actualiza el validador con collMod si ya existe; despues crea los indices
  * (createIndexes no hace nada si el indice ya existe con la misma definicion).
+ * Hook opcional de una definicion, idempotente y solo sobre colecciones
+ * existentes: migrate (antes del collMod).
  * Puede ejecutarse en cada arranque o con el script npm run db:init.
  */
 import { COLLECTION_DEFINITIONS } from './schemas/index.js';
@@ -14,7 +16,7 @@ const VALIDATION_OPTIONS = Object.freeze({ validationLevel: 'strict', validation
 /**
  * Crea o actualiza colecciones, validadores e indices.
  * @param {import('mongodb').Db} db
- * @param {ReadonlyArray<{ name: string, validator: object, indexes: object[] }>} [definitions]
+ * @param {ReadonlyArray<{ name: string, validator: object, indexes: object[], migrate?: Function }>} [definitions]
  * @param {{ info: Function }} [logger]
  * @returns {Promise<{ created: string[], updated: string[] }>} Resumen de lo realizado.
  */
@@ -28,6 +30,8 @@ export async function ensureCollections(db, definitions = COLLECTION_DEFINITIONS
     const options = { validator: definition.validator, ...VALIDATION_OPTIONS };
 
     if (existing.has(definition.name)) {
+      // Migracion opcional e idempotente: adapta documentos antiguos ANTES de endurecer el validador.
+      if (definition.migrate) await definition.migrate(db);
       await db.command({ collMod: definition.name, ...options });
       summary.updated.push(definition.name);
     } else {

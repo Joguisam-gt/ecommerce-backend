@@ -22,7 +22,42 @@ export const AUDIT_ACTIONS = Object.freeze({
   USER_ROLE_CHANGED: 'user.role_changed',
   USER_STATUS_CHANGED: 'user.status_changed',
   USER_DELETED: 'user.deleted',
+  ORDER_CREATED: 'order.created',
+  CHECKOUT_FAILED: 'order.checkout_failed',
+  PAYMENT_DECLINED: 'payment.declined',
+
+  // Fase 3: panel de administracion
+  ORDER_PAYMENT_APPROVED: 'order.payment_approved',
+  ORDER_PAYMENT_REJECTED: 'order.payment_rejected',
+  COUPON_CREATED: 'coupon.created',
+  COUPON_UPDATED: 'coupon.updated',
+  COUPON_DEACTIVATED: 'coupon.deactivated',
+  PRODUCT_UPDATED: 'product.updated',
+  INVENTORY_LOSS_RECORDED: 'inventory.loss_recorded',
+  PURCHASE_CREATED: 'purchase.created',
+  SUPPLIER_CREATED: 'supplier.created',
+  SUPPLIER_UPDATED: 'supplier.updated',
+  SUPPLIER_DEACTIVATED: 'supplier.deactivated',
+  SUPPLIER_DELETED: 'supplier.deleted',
+  CUSTOMER_UPDATED: 'customer.updated',
+  CUSTOMER_DEACTIVATED: 'customer.deactivated',
+  CUSTOMER_DELETED: 'customer.deleted',
 });
+
+/** Campos que nunca se copian a previousState / newState. */
+const SENSITIVE_STATE_FIELDS = Object.freeze(['passwordHash', 'tokenVersion', 'failedLoginAttempts', 'lockUntil']);
+
+/**
+ * Copia superficial de un documento sin campos sensibles (null si no hay estado).
+ * @param {object | null | undefined} state
+ * @returns {object | null}
+ */
+export function toAuditState(state) {
+  if (!state || typeof state !== 'object') return null;
+  const copy = { ...state };
+  for (const field of SENSITIVE_STATE_FIELDS) delete copy[field];
+  return copy;
+}
 
 export class AuditService {
   #repository;
@@ -60,6 +95,52 @@ export class AuditService {
       });
     } catch (error) {
       this.#logger.error('No se pudo registrar el evento de auditoria', { action, error: error.message });
+    }
+  }
+
+  /**
+   * Registra una mutacion administrativa con el contrato de cambio completo.
+   * Nunca lanza excepciones. Debe llamarse DESPUES del commit de la transaccion
+   * (un reintento de withTransaction duplicaria el registro).
+   * @param {{ actor: { id: string, role: string }, action: string, targetCollection: string,
+   *           targetId: unknown, previousState?: object | null, newState?: object | null,
+   *           outcome?: 'success' | 'failure', metadata?: object,
+   *           context?: { ip?: string | null, userAgent?: string | null } }} change
+   */
+  async recordChange({
+    actor,
+    action,
+    targetCollection,
+    targetId,
+    previousState = null,
+    newState = null,
+    outcome = 'success',
+    metadata = {},
+    context = {},
+  }) {
+    try {
+      const timestamp = this.#now();
+      const id = targetId === null || targetId === undefined ? null : String(targetId);
+      await this.#repository.create({
+        action,
+        entity: targetCollection,
+        entityId: id,
+        outcome,
+        actorId: actor?.id ? toObjectId(actor.id) : null,
+        actorRole: actor?.role ?? null,
+        role: actor?.role ?? null,
+        targetCollection,
+        targetId: id,
+        previousState: toAuditState(previousState),
+        newState: toAuditState(newState),
+        metadata,
+        ip: context.ip ?? null,
+        userAgent: context.userAgent ?? null,
+        timestamp,
+        createdAt: timestamp,
+      });
+    } catch (error) {
+      this.#logger.error('No se pudo registrar el cambio en auditoria', { action, error: error.message });
     }
   }
 

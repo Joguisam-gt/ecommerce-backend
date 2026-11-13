@@ -50,7 +50,8 @@ export function createApp({ config, container, logger }) {
   app.use(cookieParser());
   app.use(sanitizeInput);
 
-  app.use('/api/v1', createApiRouter(container));
+  // /api/v1 es la ruta canonica; /api es un alias para los contratos de la Fase 2 (/api/store, /api/pos...).
+  app.use(['/api/v1', '/api'], createApiRouter(container));
 
   app.use(notFound);
   app.use(createErrorHandler({ logger, isProduction: config.isProduction }));

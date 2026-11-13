@@ -3,6 +3,8 @@
  *
  * El correo se normaliza a minusculas antes de guardar, por lo que un indice
  * unico simple basta para impedir duplicados sin distinguir mayusculas.
+ * Fase 3: userCode es el codigo de cliente visible en el directorio; si falta,
+ * el directorio usa el _id en texto como codigo.
  */
 import { COLLECTIONS } from '../collections.js';
 import { ALL_ROLES } from '../../constants/roles.js';
@@ -34,6 +36,7 @@ export const usersCollection = Object.freeze({
         firstName: t.string(1, 80),
         lastName: t.string(1, 80),
         phone: t.nullableString(20),
+        userCode: t.nullableString(40),
         role: t.enumOf(ALL_ROLES),
         isActive: t.bool,
         tokenVersion: t.nonNegativeInt,
@@ -48,5 +51,11 @@ export const usersCollection = Object.freeze({
     { key: { email: 1 }, name: 'uq_users_email', unique: true },
     { key: { role: 1, isActive: 1, createdAt: -1 }, name: 'ix_users_role_active_created' },
     { key: { createdAt: -1 }, name: 'ix_users_created' },
+    {
+      key: { userCode: 1 },
+      name: 'uq_users_user_code',
+      unique: true,
+      partialFilterExpression: { userCode: { $type: 'string' } },
+    },
   ],
 });

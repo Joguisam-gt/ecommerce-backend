@@ -9,7 +9,8 @@
  * Forma de un esquema:
  * {
  *   fields: { nombre: { type, required, nullable, minLength, maxLength, pattern,
- *                       values, min, max, fromString, trim, custom } },
+ *                       values, min, max, maxDecimals, fromString, trim, custom,
+ *                       schema (solo type 'object': esquema anidado) } },
  *   minFields?: number,           // minimo de campos presentes (PATCH)
  *   allowUnknown?: boolean,       // aceptar campos no declarados
  *   refine?: (input) => Array<{ field, message }>  // reglas entre campos
@@ -73,13 +74,42 @@ function checkObjectId(value) {
   return typeof value === 'string' && /^[a-f\d]{24}$/i.test(value) ? null : 'Identificador invalido';
 }
 
+/**
+ * Comprueba un numero decimal finito con limites y numero maximo de decimales
+ * (por ejemplo, importes con maxDecimals: 2). Con fromString acepta "12.50".
+ * @returns {string | null}
+ */
+function checkNumber(value, rule) {
+  const numeric = rule.fromString && typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : value;
+  if (typeof numeric !== 'number' || !Number.isFinite(numeric)) return 'Debe ser un numero';
+  if (rule.min !== undefined && numeric < rule.min) return `Debe ser mayor o igual a ${rule.min}`;
+  if (rule.max !== undefined && numeric > rule.max) return `Debe ser menor o igual a ${rule.max}`;
+  if (rule.maxDecimals !== undefined) {
+    const decimals = (String(numeric).split('.')[1] ?? '').length;
+    if (decimals > rule.maxDecimals) return `Admite como maximo ${rule.maxDecimals} decimales`;
+  }
+  return null;
+}
+
+/**
+ * Comprueba un objeto anidado aplicando recursivamente su propio esquema (rule.schema).
+ * Los errores internos se devuelven como una lista que validateSchema prefija con el campo padre.
+ * @returns {string | Array<{ field: string, message: string }> | null}
+ */
+function checkObject(value, rule) {
+  const nested = validateSchema(rule.schema, value);
+  return nested.length > 0 ? nested : null;
+}
+
 /** Tabla de despacho tipo -> comprobador (extensible sin modificar validateField). */
 const CHECKERS = Object.freeze({
   string: checkString,
   boolean: checkBoolean,
   integer: checkInteger,
+  number: checkNumber,
   enum: checkEnum,
   objectId: checkObjectId,
+  object: checkObject,
 });
 
 /**
@@ -124,8 +154,15 @@ export function validateSchema(schema, input) {
   }
 
   for (const [field, rule] of Object.entries(schema.fields)) {
-    const message = validateField(input[field], rule);
-    if (message) errors.push({ field, message });
+    const result = validateField(input[field], rule);
+    if (Array.isArray(result)) {
+      // Errores de un objeto anidado: se prefijan con la ruta del campo padre (p. ej. "payment.last4").
+      for (const nested of result) {
+        errors.push({ field: nested.field === '_root' ? field : `${field}.${nested.field}`, message: nested.message });
+      }
+    } else if (result) {
+      errors.push({ field, message: result });
+    }
   }
 
   if (schema.minFields) {

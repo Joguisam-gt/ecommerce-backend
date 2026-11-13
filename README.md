@@ -101,3 +101,31 @@ Errores con formato uniforme: `{ "error": { "code", "message", "details?" } }`.
 - Rate limiting por IP (el bloqueo por cuenta no frena ataques distribuidos entre muchas cuentas).
 - Politica de retencion (indice TTL) para `audit_logs`.
 - Productos, cupones, carrito, POS, pedidos, facturas y proveedores.
+
+## Fase 3: panel de administrador
+
+Todas las rutas viven en `/api/v1/admin` (alias `/api/admin`). `routes/admin.routes.js` aplica
+`authenticate` (JWT) + `requireRoles(admin, superuser)` a todo el panel, y cada modulo exige ademas su
+permiso con `authorize()`. Toda mutacion se registra en `audit_logs` con `AuditService.recordChange`
+(`actorId`, `role`, `action`, `targetCollection`, `targetId`, `previousState`, `newState`, `timestamp`)
+despues del commit. Composicion en `src/admin.container.js`.
+
+| Modulo | Endpoints | Permiso |
+|---|---|---|
+| Conciliacion | `GET /orders/pending-verification`, `PATCH /orders/:id/reconcile` (`approve` / `reject` + `reason`) | `orders:manage` |
+| Cupones | `GET /coupons/applicable-products`, `GET/POST /coupons`, `GET/PATCH /coupons/:id`, `PATCH /coupons/:id/deactivate` | `coupons:manage` |
+| Inventario | `GET /inventory`, `GET /inventory/:id`, `GET/POST /inventory/losses` | `inventory:manage` |
+| Compras | `GET/POST /purchases`, `GET /purchases/:id` | `inventory:manage` |
+| Proveedores | `GET/POST /suppliers`, `GET/PATCH/DELETE /suppliers/:id`, `PATCH /suppliers/:id/deactivate` | `suppliers:manage` (+ `records:hard_delete` para DELETE) |
+| Clientes | `GET /customers`, `GET/PATCH/DELETE /customers/:id`, `PATCH /customers/:id/deactivate` | `customers:manage` (+ `records:hard_delete` para DELETE) |
+| Facturacion | `GET /invoices`, `GET /invoices/:id` (ventas y compras, filtro `entityType`) | `invoices:manage` |
+| Reportes | `GET /reports/general`, `GET /reports/products/:id/supplier-performance` | `reports:read` |
+
+Transacciones ACID (requieren replica set):
+- **Rechazo de transferencia:** pedido `rejected` + `$inc` del stock de cada linea + factura `voided` + uso de cupon liberado.
+- **Compra a proveedor:** `$inc` de stock y nuevo `costCents` por producto + documento en `purchases` + factura `entityType: "proveedor"`.
+- **Merma:** descuento condicional de stock (`stock >= cantidad`) + registro en `inventory_losses` con el costo congelado.
+
+Colecciones nuevas: `purchases`, `inventory_losses`. Cambios de esquema: `invoices.entityType`
+(`cliente` | `proveedor`), `suppliers` (`supplierCode`, `nit`, `distributionDescription`, `catalog`),
+`users.userCode` y los campos de cambio en `audit_logs`. Ejecuta `npm run db:init` tras actualizar.

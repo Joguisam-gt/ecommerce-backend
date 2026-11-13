@@ -54,5 +54,26 @@ export const email = Object.freeze({
   maxLength: 254,
 });
 
+/** Porcentaje entre 0 y 100 (admite decimales, p. ej. 12.5). */
+export const percent = Object.freeze({ bsonType: ['int', 'long', 'double'], minimum: 0, maximum: 100 });
+
+/** Direccion postal estructurada (envio y facturacion). */
+export const address = Object.freeze({
+  bsonType: 'object',
+  additionalProperties: false,
+  required: ['line1', 'city', 'country'],
+  properties: {
+    line1: { bsonType: 'string', minLength: 1, maxLength: 200 },
+    line2: { bsonType: ['string', 'null'], maxLength: 200 },
+    city: { bsonType: 'string', minLength: 1, maxLength: 100 },
+    state: { bsonType: ['string', 'null'], maxLength: 100 },
+    postalCode: { bsonType: ['string', 'null'], maxLength: 20 },
+    country: { bsonType: 'string', minLength: 2, maxLength: 2 },
+  },
+});
+
+/** Direccion opcional. */
+export const nullableAddress = Object.freeze({ ...address, bsonType: ['object', 'null'] });
+
 /** Marcas de tiempo comunes a todas las entidades mutables. */
 export const timestamps = Object.freeze({ createdAt: date, updatedAt: date });

@@ -18,6 +18,43 @@ export class HttpError extends Error {
     this.status = status;
     this.code = code;
     this.details = details;
+    /** @type {object | undefined} Cuerpo de respuesta fijado por contrato (sustituye al formato estandar). */
+    this.body = undefined;
+  }
+
+  /**
+   * 409 por stock insuficiente. Su cuerpo es un contrato publico de la Fase 2:
+   * { error: "INSUFFICIENT_STOCK", availableStock, productId, message }.
+   * @param {number} availableStock Unidades disponibles en este momento.
+   * @param {string} [productId]
+   */
+  static insufficientStock(availableStock, productId = undefined) {
+    const error = new HttpError(409, 'No hay stock suficiente para la cantidad solicitada', 'INSUFFICIENT_STOCK', {
+      availableStock,
+      productId,
+    });
+    error.body = {
+      error: 'INSUFFICIENT_STOCK',
+      availableStock,
+      ...(productId ? { productId } : {}),
+      message: error.message,
+    };
+    return error;
+  }
+
+  /** 402: el pago fue rechazado por la pasarela. */
+  static paymentRequired(message = 'El pago fue rechazado', code = 'PAYMENT_DECLINED') {
+    return new HttpError(402, message, code);
+  }
+
+  /** 422: datos validos en forma pero que incumplen una regla de negocio. */
+  static unprocessable(message = 'No se puede procesar la solicitud', code = 'UNPROCESSABLE', details = undefined) {
+    return new HttpError(422, message, code, details);
+  }
+
+  /** 502: fallo de un servicio externo (pasarela de pago). */
+  static badGateway(message = 'Fallo de un servicio externo', code = 'BAD_GATEWAY') {
+    return new HttpError(502, message, code);
   }
 
   /** 400: datos de entrada invalidos. */
