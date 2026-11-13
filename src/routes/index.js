@@ -7,8 +7,10 @@
  * refresco solo viaja a /api/v1/auth, por lo que el refresco debe usar esa ruta.
  * Fase 4: /api/superuser (modulo exclusivo de superusuario) y la ruta publica
  * /api/store/config/public; el guard de mantenimiento se aplica al checkout del POS.
+ * Documentacion: GET /docs/openapi.json sirve la especificacion OpenAPI 3.0.3 (src/docs).
  */
 import { Router } from 'express';
+import { serveOpenApi } from '../controllers/docs.controller.js';
 import { createAdminRoutes } from './admin.routes.js';
 import { createAuditLogRoutes } from './audit-log.routes.js';
 import { createAuthRoutes } from './auth.routes.js';
@@ -30,6 +32,9 @@ export function createApiRouter({ controllers, middlewares }) {
   const { authenticate, maintenanceGuard } = middlewares;
 
   router.get('/health', controllers.health.check);
+
+  // Documentacion: especificacion OpenAPI publica (sin autenticacion) para Swagger UI.
+  router.get('/docs/openapi.json', serveOpenApi);
 
   // Fase 1: identidad y administracion.
   router.use('/auth', createAuthRoutes({ authController: controllers.auth, authenticate }));
