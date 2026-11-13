@@ -31,6 +31,11 @@ export const PERMISSIONS = Object.freeze({
   INVOICES_MANAGE: 'invoices:manage',
   SUPPLIERS_MANAGE: 'suppliers:manage',
 
+  // Fase 3: panel de administracion
+  INVENTORY_MANAGE: 'inventory:manage',
+  CUSTOMERS_MANAGE: 'customers:manage',
+  REPORTS_READ: 'reports:read',
+
   // Exclusivos de superusuario
   RECORDS_HARD_DELETE: 'records:hard_delete',
   SETTINGS_MANAGE: 'settings:manage',
@@ -59,6 +64,9 @@ const ADMIN_PERMISSIONS = [
   PERMISSIONS.ORDERS_MANAGE,
   PERMISSIONS.INVOICES_MANAGE,
   PERMISSIONS.SUPPLIERS_MANAGE,
+  PERMISSIONS.INVENTORY_MANAGE,
+  PERMISSIONS.CUSTOMERS_MANAGE,
+  PERMISSIONS.REPORTS_READ,
 ];
 
 /** Permisos del superusuario: todos. */

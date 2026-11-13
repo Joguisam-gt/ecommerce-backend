@@ -146,5 +146,17 @@ export function loadConfig(env = process.env) {
       maxLoginAttempts: toInt(env.MAX_LOGIN_ATTEMPTS, 5),
       lockTimeMs: toInt(env.LOCK_TIME_MINUTES, 15) * 60 * 1000,
     },
+    store: {
+      currency: (env.STORE_CURRENCY ?? 'GTQ').toUpperCase(),
+      newArrivalsDays: toInt(env.STORE_NEW_ARRIVALS_DAYS, 30),
+      orderNumberPrefix: env.ORDER_NUMBER_PREFIX ?? 'ORD',
+      invoiceNumberPrefix: env.INVOICE_NUMBER_PREFIX ?? 'FAC',
+    },
+    payments: {
+      // Sin URL se usa la pasarela simulada en proceso; con URL, el cliente HTTP basado en fetch.
+      gatewayUrl: env.PAYMENT_GATEWAY_URL || undefined,
+      gatewayApiKey: env.PAYMENT_GATEWAY_API_KEY || undefined,
+      gatewayTimeoutMs: toInt(env.PAYMENT_GATEWAY_TIMEOUT_MS, 8000),
+    },
   });
 }

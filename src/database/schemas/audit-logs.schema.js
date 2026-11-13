@@ -4,6 +4,10 @@
  * Es una coleccion de solo escritura (append-only): el repositorio no expone
  * operaciones de actualizacion ni borrado. Los indices cubren las consultas
  * tipicas de auditoria: por fecha, por actor, por entidad y por accion.
+ *
+ * Fase 3: las mutaciones del panel de administracion registran ademas el
+ * contrato de cambio completo: role, targetCollection, targetId,
+ * previousState, newState y timestamp (ver AuditService.recordChange).
  */
 import { COLLECTIONS } from '../collections.js';
 import * as t from './schema-types.js';
@@ -30,6 +34,12 @@ export const auditLogsCollection = Object.freeze({
         ip: t.nullableString(64),
         userAgent: t.nullableString(512),
         createdAt: t.date,
+        role: t.nullableString(30),
+        targetCollection: t.nullableString(60),
+        targetId: t.nullableString(64),
+        previousState: { bsonType: ['object', 'null'] },
+        newState: { bsonType: ['object', 'null'] },
+        timestamp: t.nullableDate,
       },
     },
   },
@@ -38,5 +48,10 @@ export const auditLogsCollection = Object.freeze({
     { key: { actorId: 1, createdAt: -1 }, name: 'ix_audit_actor_created' },
     { key: { entity: 1, entityId: 1, createdAt: -1 }, name: 'ix_audit_entity_created' },
     { key: { action: 1, createdAt: -1 }, name: 'ix_audit_action_created' },
+    {
+      key: { targetCollection: 1, targetId: 1, timestamp: -1 },
+      name: 'ix_audit_target_timestamp',
+      partialFilterExpression: { targetCollection: { $type: 'string' } },
+    },
   ],
 });

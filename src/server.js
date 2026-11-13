@@ -30,7 +30,13 @@ async function bootstrap() {
     await ensureCollections(db, undefined, logger);
   }
 
-  const container = buildContainer({ db, config, logger, pingDatabase: () => database.ping() });
+  const container = buildContainer({
+    db,
+    mongoClient: database.getClient(),
+    config,
+    logger,
+    pingDatabase: () => database.ping(),
+  });
   const app = createApp({ config, container, logger });
 
   const server = app.listen(config.server.port, () => {

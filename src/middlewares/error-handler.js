@@ -43,6 +43,8 @@ export function createErrorHandler({ logger, isProduction }) {
 
     if (err instanceof HttpError) {
       if (err.status >= 500) logger.error(err.message, { code: err.code, path: req.path });
+      // Algunos errores tienen un cuerpo fijado por contrato (p. ej. INSUFFICIENT_STOCK).
+      if (err.body) return res.status(err.status).json(err.body);
       return send(res, err.status, err.code, err.message, err.details);
     }
 
