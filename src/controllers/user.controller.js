@@ -72,7 +72,11 @@ export class UserController {
     res.json({ data: UserResponseDTO.from(user) });
   };
 
-  /** DELETE /users/:id (borrado fisico, solo superusuario) */
+  /**
+   * DELETE /users/:id (borrado fisico, solo superusuario). Delega en la purga
+   * de la Fase 4: exige borrado logico previo, respeta el bloqueo fiscal y
+   * elimina el carrito en cascada. Sin cuerpo en la respuesta (204).
+   */
   remove = async (req, res) => {
     await this.#users.deleteUser(req.user, req.params.id, requestContext(req));
     res.status(204).end();

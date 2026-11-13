@@ -5,6 +5,10 @@
  * (principio de sustitucion de Liskov), lo que permite probar servicios,
  * middlewares y rutas sin un servidor de MongoDB. Tambien simulan el indice
  * unico de email lanzando un error con code 11000.
+ *
+ * Fase 4 (aditivo): InMemoryUserRepository admite el filtro "roles" en list y
+ * expone snapshot()/restore() para participar en un ejecutor de transacciones
+ * en memoria (rollback). Los parametros { session } extra se ignoran.
  */
 import { ObjectId } from 'mongodb';
 
@@ -90,8 +94,9 @@ export class InMemoryUserRepository {
     return [...this.#docs.values()].filter((doc) => doc.role === role && doc.isActive).length;
   }
 
-  async list({ page, limit, role, isActive, search }) {
+  async list({ page, limit, role, roles, isActive, search }) {
     let items = [...this.#docs.values()];
+    if (roles?.length) items = items.filter((doc) => roles.includes(doc.role));
     if (role) items = items.filter((doc) => doc.role === role);
     if (isActive !== undefined) items = items.filter((doc) => doc.isActive === isActive);
     if (search) {
@@ -106,13 +111,19 @@ export class InMemoryUserRepository {
     };
   }
 
-  async deleteById(id) {
-    return this.#docs.delete(id.toString());
-  }
-
   /** Ayuda de prueba: acceso directo al documento interno. */
   peek(id) {
     return this.#docs.get(id.toString());
+  }
+
+  /** Copia del estado (Fase 4: participante de un ejecutor de transacciones en memoria). */
+  snapshot() {
+    return new Map([...this.#docs].map(([key, doc]) => [key, { ...doc }]));
+  }
+
+  /** @param {Map<string, object>} snapshot Estado devuelto por snapshot(). */
+  restore(snapshot) {
+    this.#docs = new Map([...snapshot].map(([key, doc]) => [key, { ...doc }]));
   }
 }
 

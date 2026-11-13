@@ -7,6 +7,7 @@
  * ejecutor de transacciones por dobles en las pruebas (parametro "overrides").
  */
 import { buildAdminModule } from './admin.container.js';
+import { buildSuperuserModule } from './superuser.container.js';
 import { AuditLogController } from './controllers/audit-log.controller.js';
 import { AuthController } from './controllers/auth.controller.js';
 import { CartController } from './controllers/cart.controller.js';
@@ -114,7 +115,6 @@ export function buildContainer({
 
   // Fase 1.
   const authService = new AuthService({ ...repos, passwordService, tokenService, auditService, securityConfig: config.security, clock });
-  const userService = new UserService({ ...repos, passwordService, auditService, clock });
 
   // Fase 2.
   const cartPricingService = new CartPricingService({
@@ -147,6 +147,30 @@ export function buildContainer({
     clock,
   });
 
+  // Fase 4: modulo exclusivo de superusuario (personal, configuracion, auditoria y purga).
+  const superuser = buildSuperuserModule({
+    pick,
+    userRepository: repos.userRepository,
+    sequenceRepository: repos.sequenceRepository,
+    transactionRunner: transactions,
+    auditService,
+    passwordService,
+    clock,
+  });
+
+  // Fase 1 (gestion de usuarios): se construye despues del modulo de
+  // superusuario porque reutiliza su ruta transaccional. Cambios de rol y
+  // estado van por StaffService (centinela anti write skew) y el borrado fisico
+  // por PurgeService. La dependencia es unidireccional (sin ciclos).
+  const userService = new UserService({
+    ...repos,
+    passwordService,
+    auditService,
+    staffService: superuser.services.staffService,
+    purgeService: superuser.services.purgeService,
+    clock,
+  });
+
   return Object.freeze({
     services: {
       authService,
@@ -159,6 +183,7 @@ export function buildContainer({
       checkoutService,
       invoiceService,
       ...admin.services,
+      ...superuser.services,
     },
     controllers: {
       health: new HealthController({ pingDatabase }),
@@ -170,9 +195,12 @@ export function buildContainer({
       pos: new PosController({ checkoutService }),
       invoice: new InvoiceController({ invoiceService }),
       admin: admin.controllers,
+      superuser: superuser.controllers.superuser,
+      storeConfig: superuser.controllers.storeConfig,
     },
     middlewares: {
       authenticate: createAuthenticate({ tokenService, userRepository: repos.userRepository }),
+      maintenanceGuard: superuser.middlewares.maintenanceGuard,
     },
   });
 }

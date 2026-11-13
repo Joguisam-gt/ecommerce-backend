@@ -5,6 +5,10 @@
  * lugar de un update generico, para que los servicios no construyan consultas
  * de MongoDB y para que cada escritura sea atomica y acotada.
  * Todos los metodos reciben ObjectId ya convertidos por la capa de servicio.
+ *
+ * Fase 4: los metodos que usa StaffService aceptan un ultimo parametro opcional
+ * { session } para participar en la transaccion de gobierno de superusuarios
+ * (cambio aditivo: las llamadas existentes sin sesion no cambian).
  */
 import { COLLECTIONS } from '../database/collections.js';
 
@@ -13,6 +17,12 @@ const LIST_PROJECTION = Object.freeze({ passwordHash: 0 });
 
 /** Opciones de findOneAndUpdate: devolver el documento ya modificado. */
 const RETURN_AFTER = Object.freeze({ returnDocument: 'after', includeResultMetadata: false });
+
+/**
+ * Opciones del driver con la sesion opcional (Fase 4).
+ * @param {import('mongodb').ClientSession | undefined} session
+ */
+const withSession = (session) => (session ? { session } : {});
 
 /**
  * Escapa caracteres especiales para usar texto del usuario dentro de una RegExp.
@@ -34,26 +44,29 @@ export class UserRepository {
 
   /**
    * @param {import('mongodb').ObjectId} id
+   * @param {{ session?: import('mongodb').ClientSession }} [options]
    * @returns {Promise<object | null>}
    */
-  findById(id) {
-    return this.#collection.findOne({ _id: id });
+  findById(id, { session } = {}) {
+    return this.#collection.findOne({ _id: id }, withSession(session));
   }
 
   /**
    * @param {string} email Correo ya normalizado.
+   * @param {{ session?: import('mongodb').ClientSession }} [options]
    * @returns {Promise<object | null>}
    */
-  findByEmail(email) {
-    return this.#collection.findOne({ email });
+  findByEmail(email, { session } = {}) {
+    return this.#collection.findOne({ email }, withSession(session));
   }
 
   /**
    * Inserta un usuario y devuelve el documento con su _id.
    * @param {object} document Documento completo (ver user-document.factory.js).
+   * @param {{ session?: import('mongodb').ClientSession }} [options]
    */
-  async create(document) {
-    const { insertedId } = await this.#collection.insertOne(document);
+  async create(document, { session } = {}) {
+    const { insertedId } = await this.#collection.insertOne(document, withSession(session));
     return { ...document, _id: insertedId };
   }
 
@@ -86,12 +99,13 @@ export class UserRepository {
    * @param {import('mongodb').ObjectId} id
    * @param {string} role
    * @param {Date} now
+   * @param {{ session?: import('mongodb').ClientSession }} [options]
    */
-  updateRole(id, role, now) {
+  updateRole(id, role, now, { session } = {}) {
     return this.#collection.findOneAndUpdate(
       { _id: id },
       { $set: { role, updatedAt: now }, $inc: { tokenVersion: 1 } },
-      RETURN_AFTER,
+      { ...RETURN_AFTER, ...withSession(session) },
     );
   }
 
@@ -100,11 +114,12 @@ export class UserRepository {
    * @param {import('mongodb').ObjectId} id
    * @param {boolean} isActive
    * @param {Date} now
+   * @param {{ session?: import('mongodb').ClientSession }} [options]
    */
-  updateStatus(id, isActive, now) {
+  updateStatus(id, isActive, now, { session } = {}) {
     const update = { $set: { isActive, updatedAt: now } };
     if (!isActive) update.$inc = { tokenVersion: 1 };
-    return this.#collection.findOneAndUpdate({ _id: id }, update, RETURN_AFTER);
+    return this.#collection.findOneAndUpdate({ _id: id }, update, { ...RETURN_AFTER, ...withSession(session) });
   }
 
   /**
@@ -148,20 +163,24 @@ export class UserRepository {
   /**
    * Cuenta usuarios activos de un rol (proteccion del ultimo superusuario).
    * @param {string} role
+   * @param {{ session?: import('mongodb').ClientSession }} [options]
    */
-  countActiveByRole(role) {
-    return this.#collection.countDocuments({ role, isActive: true });
+  countActiveByRole(role, { session } = {}) {
+    return this.#collection.countDocuments({ role, isActive: true }, withSession(session));
   }
 
   /**
    * Listado paginado con filtros. La busqueda de texto se escapa y se ancla al
    * inicio para aprovechar indices y evitar expresiones costosas.
-   * @param {{ page: number, limit: number, role?: string, isActive?: boolean, search?: string }} criteria
+   * Fase 4: "roles" (lista) acota el listado a esos roles (personal: admin y
+   * superuser); si ademas llega "role" y no pertenece a la lista, no hay resultados.
+   * @param {{ page: number, limit: number, role?: string, roles?: readonly string[], isActive?: boolean, search?: string }} criteria
    * @returns {Promise<{ items: object[], total: number }>}
    */
-  async list({ page, limit, role, isActive, search }) {
+  async list({ page, limit, role, roles, isActive, search }) {
     const filter = {};
-    if (role) filter.role = role;
+    if (roles?.length) filter.role = role ? (roles.includes(role) ? role : { $in: [] }) : { $in: [...roles] };
+    else if (role) filter.role = role;
     if (isActive !== undefined) filter.isActive = isActive;
     if (search) {
       const pattern = new RegExp(`^${escapeRegex(search)}`, 'i');
@@ -180,13 +199,6 @@ export class UserRepository {
     return { items, total };
   }
 
-  /**
-   * Borrado fisico. Solo lo invoca UserService tras comprobar el permiso users:delete.
-   * @param {import('mongodb').ObjectId} id
-   * @returns {Promise<boolean>} true si se elimino un documento.
-   */
-  async deleteById(id) {
-    const { deletedCount } = await this.#collection.deleteOne({ _id: id });
-    return deletedCount === 1;
-  }
+  // Sin deleteById: el borrado fisico de usuarios pasa solo por PurgeService
+  // (PurgeRepository, en transaccion y con borrado logico previo).
 }

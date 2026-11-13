@@ -146,5 +146,12 @@ export const invoicesCollection = Object.freeze({
       unique: true,
       partialFilterExpression: { purchaseId: { $type: 'objectId' } },
     },
+    // Fase 4: bloqueo fiscal de la purga (facturas que referencian un producto o un proveedor).
+    { key: { 'items.productId': 1 }, name: 'ix_invoices_items_product' },
+    {
+      key: { supplierId: 1 },
+      name: 'ix_invoices_supplier',
+      partialFilterExpression: { supplierId: { $type: 'objectId' } },
+    },
   ],
 });

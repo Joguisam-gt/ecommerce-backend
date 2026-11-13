@@ -5,7 +5,16 @@
  * audit_logs. Un fallo al auditar se registra en el logger pero no interrumpe
  * la operacion de negocio: la disponibilidad del servicio prima, y el error
  * queda visible en los logs de la aplicacion.
+ *
+ * Fase 4:
+ * - Todas las entradas se construyen en un unico punto (#buildEntry) y llevan
+ *   siempre timestamp (= createdAt) y targetCollection (explicito o derivado
+ *   de entity; null si no se conoce).
+ * - recordInTransaction inserta dentro de la sesion de una transaccion y SI
+ *   propaga los errores: si la auditoria falla, la operacion se revierte.
+ * - search sirve la consulta paginada del superusuario.
  */
+import { COLLECTIONS } from '../database/collections.js';
 import { toObjectId } from '../utils/object-id.js';
 
 /** Catalogo de acciones auditadas (formato "entidad.accion"). */
@@ -42,7 +51,47 @@ export const AUDIT_ACTIONS = Object.freeze({
   CUSTOMER_UPDATED: 'customer.updated',
   CUSTOMER_DEACTIVATED: 'customer.deactivated',
   CUSTOMER_DELETED: 'customer.deleted',
+
+  // Fase 4: modulo exclusivo de superusuario
+  STAFF_CREATED: 'staff.created',
+  STAFF_ROLE_CHANGED: 'staff.role_changed',
+  STAFF_STATUS_CHANGED: 'staff.status_changed',
+  SETTINGS_UPDATED: 'settings.updated',
+  RECORD_PURGED: 'record.purged',
 });
+
+/**
+ * Coleccion afectada segun la entidad auditada (Fase 4), para las entradas que
+ * no indican targetCollection. Los nombres de coleccion se aceptan tal cual.
+ */
+export const ENTITY_TARGET_COLLECTIONS = Object.freeze({
+  user: COLLECTIONS.USERS,
+  customer: COLLECTIONS.USERS,
+  staff: COLLECTIONS.USERS,
+  order: COLLECTIONS.ORDERS,
+  payment: COLLECTIONS.ORDERS,
+  invoice: COLLECTIONS.INVOICES,
+  product: COLLECTIONS.PRODUCTS,
+  coupon: COLLECTIONS.COUPONS,
+  supplier: COLLECTIONS.SUPPLIERS,
+  purchase: COLLECTIONS.PURCHASES,
+  cart: COLLECTIONS.CARTS,
+  settings: COLLECTIONS.SYSTEM_SETTINGS,
+});
+
+/** Nombres de coleccion validos (para aceptar entity = nombre de coleccion). */
+const KNOWN_COLLECTIONS = Object.freeze(new Set(Object.values(COLLECTIONS)));
+
+/**
+ * Deriva la coleccion afectada de la entidad (null si no se conoce).
+ * @param {string | undefined} entity
+ * @returns {string | null}
+ */
+export function targetCollectionOf(entity) {
+  if (typeof entity !== 'string') return null;
+  if (Object.hasOwn(ENTITY_TARGET_COLLECTIONS, entity)) return ENTITY_TARGET_COLLECTIONS[entity];
+  return KNOWN_COLLECTIONS.has(entity) ? entity : null;
+}
 
 /** Campos que nunca se copian a previousState / newState. */
 const SENSITIVE_STATE_FIELDS = Object.freeze(['passwordHash', 'tokenVersion', 'failedLoginAttempts', 'lockUntil']);
@@ -74,28 +123,73 @@ export class AuditService {
   }
 
   /**
+   * Constructor unico de entradas (Fase 4): lo comparten record,
+   * recordInTransaction y recordChange para que todas las entradas tengan la
+   * misma forma. timestamp y createdAt son siempre el mismo instante.
+   * @param {{ action: string, entity: string, entityId?: unknown, outcome?: 'success' | 'failure',
+   *           actor?: { id: string, role: string } | null, metadata?: object,
+   *           context?: { ip?: string | null, userAgent?: string | null },
+   *           targetCollection?: string | null, snapshot?: object | null }} event
+   * @returns {object} Documento listo para audit_logs.
+   */
+  #buildEntry({
+    action,
+    entity,
+    entityId = null,
+    outcome = 'success',
+    actor = null,
+    metadata = {},
+    context = {},
+    targetCollection,
+    snapshot,
+  }) {
+    const timestamp = this.#now();
+    const entry = {
+      action,
+      entity,
+      entityId: entityId === null || entityId === undefined ? null : String(entityId),
+      outcome,
+      actorId: actor?.id ? toObjectId(actor.id) : null,
+      actorRole: actor?.role ?? null,
+      targetCollection: targetCollection ?? targetCollectionOf(entity),
+      metadata,
+      ip: context.ip ?? null,
+      userAgent: context.userAgent ?? null,
+      timestamp,
+      createdAt: timestamp,
+    };
+    if (snapshot !== undefined) entry.snapshot = snapshot;
+    return entry;
+  }
+
+  /**
    * Registra un evento. Nunca lanza excepciones.
    * @param {{ action: string, entity: string, entityId?: string | null, outcome?: 'success' | 'failure',
    *           actor?: { id: string, role: string } | null, metadata?: object,
-   *           context?: { ip?: string | null, userAgent?: string | null } }} event
+   *           context?: { ip?: string | null, userAgent?: string | null },
+   *           targetCollection?: string | null, snapshot?: object | null }} event
    */
-  async record({ action, entity, entityId = null, outcome = 'success', actor = null, metadata = {}, context = {} }) {
+  async record(event) {
     try {
-      await this.#repository.create({
-        action,
-        entity,
-        entityId: entityId === null ? null : String(entityId),
-        outcome,
-        actorId: actor?.id ? toObjectId(actor.id) : null,
-        actorRole: actor?.role ?? null,
-        metadata,
-        ip: context.ip ?? null,
-        userAgent: context.userAgent ?? null,
-        createdAt: this.#now(),
-      });
+      await this.#repository.create(this.#buildEntry(event));
     } catch (error) {
-      this.#logger.error('No se pudo registrar el evento de auditoria', { action, error: error.message });
+      this.#logger.error('No se pudo registrar el evento de auditoria', { action: event?.action, error: error.message });
     }
+  }
+
+  /**
+   * Registra un evento dentro de la transaccion indicada (Fase 4).
+   * A diferencia de record, PROPAGA cualquier error: el callback de la
+   * transaccion falla y MongoDB revierte la operacion auditada, de modo que no
+   * existe una mutacion sin su entrada de auditoria. Un reintento de
+   * withTransaction descarta la insercion anterior, por lo que no duplica.
+   * @param {Parameters<AuditService['record']>[0]} event
+   * @param {import('mongodb').ClientSession} session Sesion de la transaccion en curso (obligatoria).
+   * @returns {Promise<object>} Entrada insertada (con _id).
+   */
+  async recordInTransaction(event, session) {
+    if (!session) throw new Error('recordInTransaction requiere la sesion de la transaccion');
+    return this.#repository.create(this.#buildEntry(event), { session });
   }
 
   /**
@@ -119,25 +213,13 @@ export class AuditService {
     context = {},
   }) {
     try {
-      const timestamp = this.#now();
-      const id = targetId === null || targetId === undefined ? null : String(targetId);
+      const entry = this.#buildEntry({ action, entity: targetCollection, entityId: targetId, outcome, actor, metadata, context, targetCollection });
       await this.#repository.create({
-        action,
-        entity: targetCollection,
-        entityId: id,
-        outcome,
-        actorId: actor?.id ? toObjectId(actor.id) : null,
-        actorRole: actor?.role ?? null,
+        ...entry,
         role: actor?.role ?? null,
-        targetCollection,
-        targetId: id,
+        targetId: entry.entityId,
         previousState: toAuditState(previousState),
         newState: toAuditState(newState),
-        metadata,
-        ip: context.ip ?? null,
-        userAgent: context.userAgent ?? null,
-        timestamp,
-        createdAt: timestamp,
       });
     } catch (error) {
       this.#logger.error('No se pudo registrar el cambio en auditoria', { action, error: error.message });
@@ -151,6 +233,19 @@ export class AuditService {
   async list(query) {
     const criteria = { ...query, actorId: query.actorId ? toObjectId(query.actorId) : undefined };
     const { items, total } = await this.#repository.list(criteria);
+    return { items, total, page: query.page, limit: query.limit };
+  }
+
+  /**
+   * Consulta paginada del superusuario (Fase 4): filtros por actor, rol,
+   * accion, coleccion y rango de fechas sobre timestamp. Solo lectura.
+   * @param {{ page: number, limit: number, actorId?: string, actorRole?: string, action?: string,
+   *           targetCollection?: string, startDate?: Date, endDate?: Date }} query SuperuserAuditLogQueryDTO
+   * @returns {Promise<{ items: object[], total: number, page: number, limit: number }>}
+   */
+  async search(query) {
+    const criteria = { ...query, actorId: query.actorId ? toObjectId(query.actorId) : undefined };
+    const { items, total } = await this.#repository.search(criteria);
     return { items, total, page: query.page, limit: query.limit };
   }
 }
